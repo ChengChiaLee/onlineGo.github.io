@@ -1,6 +1,8 @@
 (() => {
   const canvas = document.getElementById("goCanvas");
   const ctx = canvas.getContext("2d");
+  const autoPlayToggle = document.getElementById("autoPlayToggle");
+
 
   const sizeSel = document.getElementById("sizeSel");
   const starSel = document.getElementById("starSel");
@@ -743,9 +745,14 @@
   // -----------------------------
   function isAITurn(){
     if(!aiToggle.checked) return false;
+
+    // If autoplay is on, BOTH sides are AI.
+    if(autoPlayToggle && autoPlayToggle.checked) return true;
+
     const aiColor = parseInt(aiColorSel.value, 10);
     return toPlay === aiColor;
   }
+
 
   async function maybeAIMove(){
     if(!isAITurn() || isThinking) return;
@@ -802,6 +809,11 @@
       log(`AI error: ${String(e)}`, false);
     }
   }
+  function kickAutoplay(){
+    if(!autoPlayToggle || !autoPlayToggle.checked) return;
+    // Keep the engine moving; maybeAIMove() is safe-guarded by isThinking.
+    maybeAIMove();
+  }
 
   // -----------------------------
   // UI events
@@ -836,6 +848,18 @@
 
   aiToggle.addEventListener("change", () => { setAIState("idle"); maybeAIMove(); });
   aiColorSel.addEventListener("change", () => { setAIState("idle"); maybeAIMove(); });
+
+  if(autoPlayToggle){
+    autoPlayToggle.addEventListener("change", () => {
+      setAIState("idle");
+      if(autoPlayToggle.checked){
+        // ensure AI is enabled
+        aiToggle.checked = true;
+      }
+      maybeAIMove();
+    });
+  }
+
 
   thinkMs.addEventListener("input", () => thinkMsLabel.textContent = thinkMs.value);
   thinkMsLabel.textContent = thinkMs.value;

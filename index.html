@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Go (Baduk) — vs MCTS</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="title">
+        <h1>Go (Baduk / Weiqi)</h1>
+        <div class="sub">Rules: capture by liberties, suicide illegal, simple ko, pass, undo.</div>
+      </div>
+
+      <div class="turnPill" id="turnPill">
+        <span class="dot black" id="turnDot"></span>
+        <span id="turnText">Black to play</span>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="boardCard">
+        <div class="boardWrap">
+          <div class="canvasWrap">
+            <canvas id="goCanvas"></canvas>
+          </div>
+
+          <div class="hintRow">
+            <div>Click intersections to play.</div>
+            <div id="coordHint">—</div>
+          </div>
+        </div>
+      </section>
+
+      <aside class="side">
+        <section class="card">
+          <h2>Controls</h2>
+
+          <div class="grid2">
+            <label>
+              Board size
+              <select id="sizeSel">
+                <option value="9">9×9</option>
+                <option value="13">13×13</option>
+                <option value="19" selected>19×19</option>
+              </select>
+            </label>
+
+            <label>
+              Star points
+              <select id="starSel">
+                <option value="auto" selected>Auto</option>
+                <option value="off">Off</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="grid2">
+            <label class="toggle">
+              <span>Play vs AI (MCTS)</span>
+              <input type="checkbox" id="aiToggle" checked />
+            </label>
+
+            <label>
+              AI color
+              <select id="aiColorSel">
+                <option value="2" selected>White</option>
+                <option value="1">Black</option>
+              </select>
+            </label>
+          </div>
+
+          <label>
+            AI thinking time (ms)
+            <input id="thinkMs" type="range" min="100" max="2000" step="50" value="700" />
+            <div class="rangeRow">
+              <span class="muted">faster</span>
+              <b id="thinkMsLabel">700</b>
+              <span class="muted">stronger</span>
+            </div>
+          </label>
+
+          <div class="row">
+            <button id="newBtn">New game</button>
+            <button class="secondary" id="passBtn">Pass</button>
+          </div>
+          <div class="row">
+            <button class="secondary" id="undoBtn">Undo</button>
+            <button class="danger" id="clearBtn">Clear board</button>
+          </div>
+
+          <div class="kpis">
+            <div class="pill"><span class="dot black"></span> Captures: <b id="capB">0</b></div>
+            <div class="pill"><span class="dot white"></span> Captures: <b id="capW">0</b></div>
+            <div class="pill">Move: <b id="moveNo">0</b></div>
+            <div class="pill">Last: <b id="lastMove">—</b></div>
+            <div class="pill" id="aiStatePill">AI: <b id="aiState">idle</b></div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Status</h2>
+          <pre class="log" id="log"></pre>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script src="go.js"></script>
+</body>
+</html>

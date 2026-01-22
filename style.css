@@ -83,7 +83,6 @@ body{
   grid-template-columns: 1.1fr .9fr;
   gap:12px;
 }
-
 @media (max-width: 920px){
   .layout{grid-template-columns:1fr}
 }

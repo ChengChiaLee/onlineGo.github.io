@@ -79,14 +79,24 @@
           </div>
 
           <label>
-            AI thinking time (ms)
-            <input id="thinkMs" type="range" min="100" max="100000" step="50" value="700" />
-            <div class="rangeRow">
-              <span class="muted">faster</span>
-              <b id="thinkMsLabel">700</b>
-              <span class="muted">stronger</span>
-            </div>
-          </label>
+  AI thinking time (ms)
+  <input
+    id="thinkMs"
+    class="thinkMsInput"
+    type="number"
+    min="100"
+    max="100000"
+    step="50"
+    value="700"
+  />
+</label>
+
+<div class="rangeRow">
+  <span class="muted">faster</span>
+  <b id="thinkMsLabel">700</b>
+  <span class="muted">stronger</span>
+</div>
+
 
           <div class="row">
             <button id="newBtn">New game</button>

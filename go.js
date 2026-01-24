@@ -3,7 +3,6 @@
   const ctx = canvas.getContext("2d");
   const autoPlayToggle = document.getElementById("autoPlayToggle");
 
-
   const sizeSel = document.getElementById("sizeSel");
   const starSel = document.getElementById("starSel");
   const newBtn  = document.getElementById("newBtn");
@@ -33,7 +32,6 @@
   let toPlay = 1;
 
   // history: store boards AFTER each ply (including passes)
-  // history[history.length-1] is current board position
   let history = [];
   let captures = {1:0, 2:0};
   let moves = [];
@@ -45,7 +43,7 @@
   // AI
   let isThinking = false;
   let thinkToken = 0;
-  const KOMI = 6.5; // used by MCTS eval
+  const KOMI = 6.5;
 
   function deepCopyBoard(b){ return b.map(r => r.slice()); }
   function sameBoard(a,b){
@@ -68,27 +66,44 @@
     return out;
   }
 
+  // --- FAST group marking (reused across calls) ---
+  let _mark = null;
+  let _markId = 1;
+  function _ensureMark(){
+    const sz = N * N;
+    if(!_mark || _mark.length !== sz) _mark = new Int32Array(sz);
+    _markId = (_markId + 1) | 0;
+    if(_markId === 0){ _mark.fill(0); _markId = 1; }
+  }
+
   function groupInfo(b, sx, sy){
     const color = b[sy][sx];
-    const stack = [[sx,sy]];
-    const seen = Array.from({length:N}, () => Array(N).fill(false));
-    seen[sy][sx] = true;
+    _ensureMark();
+
+    const stack = [[sx, sy]];
+    _mark[sy * N + sx] = _markId;
+
     const stones = [];
     const libs = new Set();
 
     while(stack.length){
       const [x,y] = stack.pop();
       stones.push([x,y]);
+
       for(const [nx,ny] of neighbors(x,y)){
         const v = b[ny][nx];
-        if(v === 0) libs.add(nx + "," + ny);
-        else if(v === color && !seen[ny][nx]){
-          seen[ny][nx] = true;
-          stack.push([nx,ny]);
+        if(v === 0){
+          libs.add(nx + "," + ny);
+        }else if(v === color){
+          const idx = ny * N + nx;
+          if(_mark[idx] !== _markId){
+            _mark[idx] = _markId;
+            stack.push([nx,ny]);
+          }
         }
       }
     }
-    return {stones, liberties:libs};
+    return {stones, liberties: libs};
   }
 
   function removeStones(b, stones){
@@ -96,7 +111,7 @@
   }
 
   function coordName(x,y){
-    const letters = "ABCDEFGHJKLMNOPQRSTUVWXZY"; // skip I
+    const letters = "ABCDEFGHJKLMNOPQRSTUVWXYZ"; // skip I
     const col = letters[x] || "?";
     const row = (N - y);
     return col + row;
@@ -199,7 +214,6 @@
 
         // stone body
         if(v === 1){
-          // BLACK: solid (實心)
           ctx.beginPath();
           ctx.fillStyle = "#0b0f14";
           ctx.arc(cx, cy, stoneR, 0, Math.PI*2);
@@ -209,7 +223,6 @@
           ctx.strokeStyle = "rgba(255,255,255,.06)";
           ctx.stroke();
         }else{
-          // WHITE: slightly shaded
           const grad = ctx.createRadialGradient(
             cx - stoneR*0.35, cy - stoneR*0.35, stoneR*0.2,
             cx, cy, stoneR*1.2
@@ -232,11 +245,10 @@
 
   // -----------------------------
   // Game rules (simple ko = cannot repeat previous position)
-  // Compare candidate next board to previous board (history[-2]) when available.
   // -----------------------------
   function applyMove(b, player, mv, prevBoard){
     // mv: {x,y} or null for pass
-    if(mv === null) return {board: deepCopyBoard(b), captured: 0, pass: true};
+    if(mv === null) return {board: b, captured: 0, pass: true};
 
     const x = mv.x, y = mv.y;
     if(!inBounds(x,y)) return null;
@@ -270,7 +282,6 @@
   }
 
   function currentPrevBoard(){
-    // previous position (one ply ago)
     if(history.length >= 2) return history[history.length - 2];
     return null;
   }
@@ -326,7 +337,6 @@
       return;
     }
 
-    // cancel AI in-flight
     thinkToken++;
     isThinking = false;
     setAIState("idle");
@@ -409,20 +419,8 @@
   }
 
   // -----------------------------
-  // MCTS (UCT) in JS
-  // - uses local move pruning to keep branching manageable
-  // - rollouts are light + biased toward captures
+  // MCTS (UCT) in JS (strengthened)
   // -----------------------------
-  function boardKey(b){
-    // fast-ish string key; enough for local use
-    let s = "";
-    for(let y=0;y<N;y++){
-      for(let x=0;x<N;x++) s += String(b[y][x]);
-      s += "|";
-    }
-    return s;
-  }
-
   function occupiedPoints(b){
     const pts = [];
     for(let y=0;y<N;y++) for(let x=0;x<N;x++) if(b[y][x] !== 0) pts.push([x,y]);
@@ -467,36 +465,76 @@
     return cand;
   }
 
-  function legalMovesForMCTS(b, player, prevBoard){
-    // union: capture candidates + local candidates + a few random empties if too small
+  function countStones(b){
+    let c = 0;
+    for(let y=0;y<N;y++) for(let x=0;x<N;x++) if(b[y][x] !== 0) c++;
+    return c;
+  }
+
+  function atariSaves(b, player){
+    const cand = new Set();
+    const seen = Array.from({length:N}, () => Array(N).fill(false));
+    for(let y=0;y<N;y++){
+      for(let x=0;x<N;x++){
+        if(b[y][x] !== player || seen[y][x]) continue;
+        const info = groupInfo(b, x, y);
+        for(const [sx,sy] of info.stones) seen[sy][sx] = true;
+        if(info.liberties.size === 1){
+          const one = info.liberties.values().next().value; // "x,y"
+          cand.add(one);
+        }
+      }
+    }
+    return cand;
+  }
+
+  function openingMoves(b){
+    const stones = countStones(b);
+    if(stones >= (N===19 ? 10 : (N===13 ? 8 : 6))) return [];
+    const stars = computeStarPoints(N);
+    const out = [];
+    for(const [x,y] of stars){
+      if(b[y][x] === 0) out.push(x + "," + y);
+    }
+    return out;
+  }
+
+  function legalMovesForMCTS(b, player, prevBoard, passes=0){
     const s = new Set();
+
+    for(const k of openingMoves(b)) s.add(k);
     for(const k of captureCandidates(b, player)) s.add(k);
+    for(const k of atariSaves(b, player)) s.add(k);
     for(const k of localCandidateMoves(b)) s.add(k);
 
-    if(s.size < 10){
-      const empties = [];
-      for(let y=0;y<N;y++) for(let x=0;x<N;x++) if(b[y][x] === 0) empties.push([x,y]);
-      for(let i=empties.length-1;i>0;i--){
-        const j = (Math.random() * (i+1)) | 0;
-        [empties[i], empties[j]] = [empties[j], empties[i]];
-      }
-      for(let i=0;i<Math.min(40, empties.length); i++){
-        s.add(empties[i][0] + "," + empties[i][1]);
-      }
+    // sprinkle global exploration
+    const empties = [];
+    for(let y=0;y<N;y++) for(let x=0;x<N;x++) if(b[y][x] === 0) empties.push([x,y]);
+    for(let i=empties.length-1;i>0;i--){
+      const j = (Math.random() * (i+1)) | 0;
+      [empties[i], empties[j]] = [empties[j], empties[i]];
+    }
+    const sprinkle = Math.min(N===19 ? 18 : 12, empties.length);
+    for(let i=0;i<sprinkle;i++){
+      s.add(empties[i][0] + "," + empties[i][1]);
     }
 
     const out = [];
     for(const key of s){
       const [x,y] = key.split(",").map(Number);
       const res = applyMove(b, player, {x,y}, prevBoard);
-      if(res) out.push({x,y});
+      if(res) out.push({x,y, _cap: res.captured});
     }
-    out.push(null); // pass always allowed
+
+    // PASS policy: don’t encourage early pass
+    const stones = countStones(b);
+    const boardFullish = stones > (N*N*0.82);
+    if(passes > 0 || boardFullish || out.length === 0) out.push(null);
+
     return out;
   }
 
   function trompTaylorWinner(b, komi){
-    // area scoring approximation (stones + surrounded empty regions)
     let bSt = 0, wSt = 0;
     for(let y=0;y<N;y++){
       for(let x=0;x<N;x++){
@@ -511,7 +549,7 @@
     for(let y0=0;y0<N;y0++){
       for(let x0=0;x0<N;x0++){
         if(b[y0][x0] !== 0 || seen[y0][x0]) continue;
-        // flood empty region
+
         const stack = [[x0,y0]];
         seen[y0][x0] = true;
         const region = [];
@@ -547,8 +585,72 @@
     return 0;
   }
 
+  function isStarPointMove(x,y){
+    const stars = computeStarPoints(N);
+    for(const [sx,sy] of stars) if(sx===x && sy===y) return true;
+    return false;
+  }
+
+  function playoutPickMove(b, player, prevBoard, passes, ply, maxPlies){
+    // 1) immediate captures
+    const caps = Array.from(captureCandidates(b, player));
+    for(let t=0; t<Math.min(10, caps.length); t++){
+      const k = caps[(Math.random() * caps.length) | 0];
+      const [x,y] = k.split(",").map(Number);
+      const res = applyMove(b, player, {x,y}, prevBoard);
+      if(res) return {mv:{x,y}, res};
+    }
+
+    // 2) save own atari
+    const saves = Array.from(atariSaves(b, player));
+    for(let t=0; t<Math.min(10, saves.length); t++){
+      const k = saves[(Math.random() * saves.length) | 0];
+      const [x,y] = k.split(",").map(Number);
+      const res = applyMove(b, player, {x,y}, prevBoard);
+      if(res) return {mv:{x,y}, res};
+    }
+
+    // 3) weighted candidate pick
+    const cand = legalMovesForMCTS(b, player, prevBoard, passes);
+
+    let best = null;
+    let bestW = -1;
+
+    const stones = countStones(b);
+    const early = stones < (N===19 ? 14 : (N===13 ? 10 : 8));
+
+    for(const mv of cand){
+      if(mv === null){
+        const late = ply > maxPlies * 0.70;
+        if(!late && passes === 0) continue;
+        const w = late ? 0.2 : 0.05;
+        if(w > bestW){ bestW = w; best = {mv:null, res:{board:b, captured:0}}; }
+        continue;
+      }
+
+      const res = applyMove(b, player, mv, prevBoard);
+      if(!res) continue;
+
+      let w = 1.0;
+
+      if(res.captured > 0) w += 10 + 2*res.captured;
+      if(early && isStarPointMove(mv.x, mv.y)) w += 2.0;
+
+      if(res.captured === 0){
+        const info = groupInfo(res.board, mv.x, mv.y);
+        if(info.liberties.size === 1) w *= 0.15; // soft self-atari avoidance
+      }
+
+      w *= (0.85 + 0.30*Math.random());
+
+      if(w > bestW){ bestW = w; best = {mv, res}; }
+    }
+
+    return best ? best : {mv:null, res:{board:b, captured:0}};
+  }
+
   function rolloutSim(startBoard, startPlayer, startPrevBoard, startPasses, komi, maxPlies){
-    let b = deepCopyBoard(startBoard);
+    let b = startBoard;
     let player = startPlayer;
     let prevBoard = startPrevBoard;
     let passes = startPasses;
@@ -556,60 +658,26 @@
     for(let ply=0; ply<maxPlies; ply++){
       if(passes >= 2) break;
 
-      // biased to captures
-      let mv = null;
-      const caps = Array.from(captureCandidates(b, player));
-      if(caps.length){
-        for(let k=0; k<Math.min(8, caps.length); k++){
-          const idx = (Math.random() * caps.length) | 0;
-          const [x,y] = caps[idx].split(",").map(Number);
-          const tryRes = applyMove(b, player, {x,y}, prevBoard);
-          if(tryRes){
-            mv = {x,y};
-            b = tryRes.board;
-            prevBoard = deepCopyBoard(prevBoard ? prevBoard : prevBoard); // keep reference safe
-            prevBoard = deepCopyBoard(prevBoard ?? b); // overwritten below anyway
-            break;
-          }
-        }
-      }
+      const old = b;
+      const pick = playoutPickMove(b, player, prevBoard, passes, ply, maxPlies);
+      const mv = pick.mv;
 
       if(mv === null){
-        const mvs = legalMovesForMCTS(b, player, prevBoard);
-        const nonPass = mvs.filter(x => x !== null);
-        let chosen = null;
-
-        if(nonPass.length) chosen = nonPass[(Math.random() * nonPass.length) | 0];
-        else chosen = null;
-
-        const res = applyMove(b, player, chosen, prevBoard);
+        const res = applyMove(b, player, null, prevBoard);
+        b = res.board;
+        prevBoard = old;
+        passes += 1;
+      }else{
+        const res = pick.res || applyMove(b, player, mv, prevBoard);
         if(!res){
-          // fallback pass
           const r2 = applyMove(b, player, null, prevBoard);
           b = r2.board;
-          passes += 1;
-          prevBoard = deepCopyBoard(b); // after pass, "prev position" becomes old position; approximation OK
-        }else{
-          const old = b;
-          b = res.board;
-          passes = (chosen === null) ? (passes + 1) : 0;
           prevBoard = old;
-        }
-      }else{
-        // if capture chosen
-        const old = b; // note: b already updated above in capture branch; keep correct prevBoard update
-        // This path is messy; easiest: re-apply properly:
-        const res = applyMove(old, player, mv, prevBoard);
-        if(res){
-          const pre = old;
+          passes += 1;
+        }else{
           b = res.board;
-          prevBoard = pre;
+          prevBoard = old;
           passes = 0;
-        }else{
-          const r2 = applyMove(old, player, null, prevBoard);
-          b = r2.board;
-          prevBoard = old;
-          passes += 1;
         }
       }
 
@@ -620,55 +688,69 @@
   }
 
   class MCTSNode{
-    constructor(board, player, prevBoard, passes, parent=null, move=null){
+    // toPlay: player to play at this node
+    // playerJustMoved: player who made the move leading to this node (0 for root)
+    constructor(board, toPlay, prevBoard, passes, parent=null, move=null, playerJustMoved=0){
       this.board = board;
-      this.player = player;     // to play at this node
-      this.prevBoard = prevBoard; // previous position (for simple ko)
+      this.toPlay = toPlay;
+      this.prevBoard = prevBoard;
       this.passes = passes;
 
       this.parent = parent;
       this.move = move;
+      this.playerJustMoved = playerJustMoved;
+
       this.children = [];
       this.untried = null;
 
       this.visits = 0;
-      this.wins = 0.0; // from ROOT player's perspective
+      this.wins = 0.0; // wins for playerJustMoved
     }
     ensureUntried(){
       if(this.untried === null){
-        this.untried = legalMovesForMCTS(this.board, this.player, this.prevBoard);
+        this.untried = legalMovesForMCTS(this.board, this.toPlay, this.prevBoard, this.passes);
       }
     }
   }
 
-  function uctSelect(node, c=1.35){
-    const lnN = Math.log(Math.max(1, node.visits));
-    let best = null;
-    let bestVal = -1e100;
-
-    for(const ch of node.children){
-      if(ch.visits === 0) return ch;
-      const exploit = ch.wins / ch.visits;
-      const explore = c * Math.sqrt(lnN / ch.visits);
-      const val = exploit + explore;
-      if(val > bestVal){
-        bestVal = val;
-        best = ch;
-      }
-    }
-    return best;
-  }
-
-  function mctsAsync(rootBoard, rootPlayer, rootPrevBoard, komi, thinkingMs){
+  function mctsAsync(rootBoard, rootPlayer, rootPrevBoard, rootPasses, komi, thinkingMs){
     const start = performance.now();
     const deadline = start + Math.max(50, thinkingMs);
 
-    const root = new MCTSNode(deepCopyBoard(rootBoard), rootPlayer, rootPrevBoard ? deepCopyBoard(rootPrevBoard) : null, 0);
+    const root = new MCTSNode(
+      deepCopyBoard(rootBoard),
+      rootPlayer,
+      rootPrevBoard ? deepCopyBoard(rootPrevBoard) : null,
+      rootPasses,
+      null,
+      null,
+      0
+    );
     root.ensureUntried();
 
     const maxPlies = Math.min(N*N*2, (N===9?180:(N===13?260:320)));
-
     let iters = 0;
+
+    function uctSelect(node, c=1.35){
+      const lnN = Math.log(Math.max(1, node.visits));
+      let best = null;
+      let bestVal = -1e100;
+
+      for(const ch of node.children){
+        if(ch.visits === 0) return ch;
+
+        // ch.wins is for ch.playerJustMoved, which equals node.toPlay
+        const exploit = ch.wins / ch.visits;
+        const explore = c * Math.sqrt(lnN / ch.visits);
+        const val = exploit + explore;
+
+        if(val > bestVal){
+          bestVal = val;
+          best = ch;
+        }
+      }
+      return best;
+    }
 
     function iterateOnce(){
       iters++;
@@ -690,45 +772,44 @@
         node.untried[idx] = node.untried[node.untried.length - 1];
         node.untried.pop();
 
-        const res = applyMove(node.board, node.player, mv, node.prevBoard);
-        if(!res){
-          return; // illegal candidate
-        }
+        const res = applyMove(node.board, node.toPlay, mv, node.prevBoard);
+        if(!res) return;
 
-        const nextPlayer = (node.player===1?2:1);
-        const nextPasses = mv === null ? (node.passes + 1) : 0;
+        const nextPlayer = (node.toPlay===1?2:1);
+        const nextPasses = (mv === null) ? (node.passes + 1) : 0;
 
-        // child's "prevBoard" is this node's board (previous position for next move)
-        const childPrev = node.board;
+        const childPrev = node.board;     // previous position for next move (ko)
+        const pj = node.toPlay;           // player who just moved
 
-        const child = new MCTSNode(res.board, nextPlayer, childPrev, nextPasses, node, mv);
+        const child = new MCTSNode(res.board, nextPlayer, childPrev, nextPasses, node, mv, pj);
         node.children.push(child);
         node = child;
       }
 
       // simulation
-      const winner = rolloutSim(node.board, node.player, node.prevBoard, node.passes, komi, maxPlies);
+      const winner = rolloutSim(node.board, node.toPlay, node.prevBoard, node.passes, komi, maxPlies);
 
-      // backprop (root-player perspective)
-      const result = (winner === rootPlayer) ? 1.0 : (winner === 0 ? 0.5 : 0.0);
+      // backprop: credit playerJustMoved at each node
       while(node){
         node.visits += 1;
-        node.wins += result;
+        if(node.playerJustMoved !== 0){
+          const r = (winner === 0) ? 0.5 : (winner === node.playerJustMoved ? 1.0 : 0.0);
+          node.wins += r;
+        }
         node = node.parent;
       }
     }
 
     return new Promise(resolve => {
       function loop(){
-        const tokenSliceEnd = Math.min(deadline, performance.now() + 12); // yield every ~12ms
-        while(performance.now() < tokenSliceEnd && performance.now() < deadline){
+        const sliceEnd = Math.min(deadline, performance.now() + 12);
+        while(performance.now() < sliceEnd && performance.now() < deadline){
           iterateOnce();
         }
 
         if(performance.now() < deadline){
           setTimeout(loop, 0);
         }else{
-          // choose child with max visits
           let best = null;
           for(const ch of root.children){
             if(!best || ch.visits > best.visits) best = ch;
@@ -746,18 +827,15 @@
   function isAITurn(){
     if(!aiToggle.checked) return false;
 
-    // If autoplay is on, BOTH sides are AI.
     if(autoPlayToggle && autoPlayToggle.checked) return true;
 
     const aiColor = parseInt(aiColorSel.value, 10);
     return toPlay === aiColor;
   }
 
-
   async function maybeAIMove(){
     if(!isAITurn() || isThinking) return;
 
-    // prevent human input while thinking
     isThinking = true;
     const myToken = ++thinkToken;
     setAIState("thinking");
@@ -766,9 +844,8 @@
     const prev = currentPrevBoard();
 
     try{
-      const {move, iters} = await mctsAsync(board, toPlay, prev, KOMI, ms);
+      const {move, iters} = await mctsAsync(board, toPlay, prev, consecutivePasses, KOMI, ms);
 
-      // canceled by undo/new/etc
       if(myToken !== thinkToken){
         isThinking = false;
         setAIState("idle");
@@ -787,7 +864,7 @@
         isThinking = false;
         setAIState("idle");
         log("AI plays: pass");
-        pass(); // pass() calls maybeAIMove() again
+        pass();
         return;
       }
 
@@ -809,9 +886,9 @@
       log(`AI error: ${String(e)}`, false);
     }
   }
+
   function kickAutoplay(){
     if(!autoPlayToggle || !autoPlayToggle.checked) return;
-    // Keep the engine moving; maybeAIMove() is safe-guarded by isThinking.
     maybeAIMove();
   }
 
@@ -853,18 +930,36 @@
     autoPlayToggle.addEventListener("change", () => {
       setAIState("idle");
       if(autoPlayToggle.checked){
-        // ensure AI is enabled
         aiToggle.checked = true;
       }
       maybeAIMove();
     });
   }
 
-
   thinkMs.addEventListener("input", () => thinkMsLabel.textContent = thinkMs.value);
   thinkMsLabel.textContent = thinkMs.value;
 
   window.addEventListener("resize", resize);
+select, input[type="range"], input[type="number"], button{
+  border-radius:12px;
+  border:1px solid var(--stroke);
+  background: rgba(0,0,0,.18);
+  color:var(--text);
+  padding:10px 10px;
+  outline:none;
+  font-size:13px;
+}
+
+/* Optional: nicer number input alignment */
+.thinkMsInput{
+  width: 100%;
+}
+
+/* Optional: reduce spinner visual noise (keeps functionality) */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button{
+  opacity: 0.6;
+}
 
   // init
   function init(){

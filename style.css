@@ -227,3 +227,25 @@ button.danger{ background: linear-gradient(180deg, #c04848, var(--danger)); }
   word-break:break-word;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
+
+select, input[type="range"], input[type="number"], button{
+  border-radius:12px;
+  border:1px solid var(--stroke);
+  background: rgba(0,0,0,.18);
+  color:var(--text);
+  padding:10px 10px;
+  outline:none;
+  font-size:13px;
+}
+
+/* Optional: nicer number input alignment */
+.thinkMsInput{
+  width: 100%;
+}
+
+/* Optional: reduce spinner visual noise (keeps functionality) */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button{
+  opacity: 0.6;
+}
+
